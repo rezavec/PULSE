@@ -225,6 +225,21 @@
     cursor: default;
     animation: none;
   }
+
+  .score-popup {
+    position: fixed;
+    pointer-events: none;
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-size: 22px;
+    z-index: 1000;
+    animation: popup-rise .8s ease-out forwards;
+  }
+
+  @keyframes popup-rise {
+    0%   { transform: translateY(0); opacity: 1; }
+    100% { transform: translateY(-80px); opacity: 0; }
+  }
 </style>
 </head>
 <body>
@@ -394,6 +409,19 @@ function handleClick() {
     if (state.streak > state.maxStreak) state.maxStreak = state.streak;
     state.nextWinIn = generateWinTicket();
     showFeedback(`${tier.name} +${points}`, tier.color);
+
+    // Particles from button center
+    const bc = getBtnCenter();
+    spawnParticles(bc.x, bc.y, tier.name);
+
+    // Score popup
+    const resolvedColor = tier.color.startsWith('var(') ?
+      getComputedStyle(document.documentElement).getPropertyValue(tier.color.slice(4, -1)).trim() : tier.color;
+    spawnScorePopup(bc.x - 30, bc.y - 40, '+' + points, resolvedColor);
+
+    // Screen shake for big wins
+    if (tier.name === 'SURGE 💜') screenShake(8, 400);
+    if (tier.name === 'PULSE MAX ✨') screenShake(15, 700);
   } else {
     // LOSE
     if (state.combo > 1) {
@@ -411,6 +439,112 @@ function handleClick() {
   }
 
   updateUI();
+}
+
+// ---- CANVAS + PARTICLES ----
+const canvas = document.createElement('canvas');
+canvas.style.cssText = 'position:fixed;top:0;left:0;pointer-events:none;z-index:999;';
+document.body.appendChild(canvas);
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+class Particle {
+  constructor(x, y, config) {
+    this.x = x; this.y = y;
+    this.vx = (Math.random() - 0.5) * config.speed;
+    this.vy = (Math.random() - 0.5) * config.speed - config.upBias;
+    this.size = Math.random() * config.maxSize + config.minSize;
+    this.color = config.colors[Math.floor(Math.random() * config.colors.length)];
+    this.life = 1.0;
+    this.decay = config.decay;
+    this.gravity = config.gravity || 0.1;
+  }
+  update() {
+    this.x += this.vx; this.y += this.vy;
+    this.vy += this.gravity;
+    this.life -= this.decay;
+  }
+  draw(ctx) {
+    ctx.save();
+    ctx.globalAlpha = this.life;
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+const PARTICLE_CONFIGS = {
+  'SPARK ⚡':     { count: 8,   speed: 4,  upBias: 1, minSize: 2, maxSize: 2, decay: 0.08,  gravity: 0.1,  colors: ['#ffd700','#00ff88'] },
+  'FLASH 💎':     { count: 20,  speed: 6,  upBias: 2, minSize: 3, maxSize: 3, decay: 0.05,  gravity: 0.1,  colors: ['#00d4ff','#00ff88'] },
+  'BURST 🔥':     { count: 40,  speed: 8,  upBias: 2, minSize: 4, maxSize: 4, decay: 0.04,  gravity: 0.1,  colors: ['#00ff88','#00d4ff','#ff0066','#bb00ff','#ffd700'] },
+  'SURGE 💜':     { count: 70,  speed: 10, upBias: 3, minSize: 5, maxSize: 5, decay: 0.025, gravity: 0.15, colors: ['#bb00ff','#dd44ff','#ffd700'] },
+  'PULSE MAX ✨': { count: 120, speed: 12, upBias: 4, minSize: 6, maxSize: 8, decay: 0.015, gravity: 0.1,  colors: ['#00ff88','#00d4ff','#ff0066','#bb00ff','#ffd700','#dd44ff'] },
+};
+
+let particles = [];
+
+function spawnParticles(x, y, tierName) {
+  const config = PARTICLE_CONFIGS[tierName];
+  if (!config) return;
+  for (let i = 0; i < config.count; i++) {
+    particles.push(new Particle(x, y, config));
+  }
+}
+
+function particleLoop() {
+  if (particles.length > 0) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    particles.forEach(p => { p.update(); p.draw(ctx); });
+    particles = particles.filter(p => p.life > 0);
+    if (particles.length === 0) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  requestAnimationFrame(particleLoop);
+}
+particleLoop();
+
+// ---- SCREEN SHAKE ----
+function screenShake(intensity, duration) {
+  const start = Date.now();
+  const shake = () => {
+    const elapsed = Date.now() - start;
+    if (elapsed < duration) {
+      const factor = 1 - elapsed / duration;
+      const dx = (Math.random() - 0.5) * intensity * factor;
+      const dy = (Math.random() - 0.5) * intensity * factor;
+      document.body.style.transform = `translate(${dx}px, ${dy}px)`;
+      requestAnimationFrame(shake);
+    } else {
+      document.body.style.transform = '';
+    }
+  };
+  shake();
+}
+
+// ---- SCORE POPUP ----
+function spawnScorePopup(x, y, text, color) {
+  const el = document.createElement('div');
+  el.className = 'score-popup';
+  el.textContent = text;
+  el.style.left = x + 'px';
+  el.style.top = y + 'px';
+  el.style.color = color;
+  el.style.textShadow = `0 0 10px ${color}`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 800);
+}
+
+// ---- BUTTON CENTER HELPER ----
+function getBtnCenter() {
+  const r = $btn.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 
 // Init
